@@ -7,7 +7,7 @@
 // to the dummyListings array so the UI always looks populated.
 // ──────────────────────────────────────────────────────────────
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLang } from "@/context/LanguageContext";
 import { ListingCard } from "@/components/ListingCard";
@@ -15,7 +15,7 @@ import { Select } from "@/components/ui/FormFields";
 import { dummyListings } from "@/lib/dummy-listings";
 import type { Listing } from "@/types/listing";
 
-export default function ListingsPage() {
+function ListingsContent() {
   const { t } = useLang();
   const searchParams = useSearchParams();
 
@@ -124,5 +124,13 @@ export default function ListingsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ListingsPage() {
+  return (
+    <Suspense fallback={<div className="mx-auto max-w-6xl px-4 py-10"><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">{Array.from({ length: 8 }).map((_, i) => (<div key={i} className="h-64 rounded-2xl bg-surface-subtle animate-pulse" />))}</div></div>}>
+      <ListingsContent />
+    </Suspense>
   );
 }
