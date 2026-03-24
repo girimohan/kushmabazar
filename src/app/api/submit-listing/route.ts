@@ -85,16 +85,11 @@ export async function POST(req: NextRequest) {
     Location: location,
     ContactName: contactName,
     ContactPhone: contactPhone,
+    ContactEmail: contactEmail,
+    Price: price ? String(price) : "",
     Status: "Pending",
     ImportedToListings: false,
   };
-
-  if (price && !isNaN(Number(price))) {
-    fields.Price = Number(price);
-  }
-  if (contactEmail) {
-    fields.ContactEmail = contactEmail;
-  }
   if (imageUrls.length > 0) {
     // Airtable attachment field expects array of { url } objects
     fields.Images = imageUrls.map((url) => ({ url }));
