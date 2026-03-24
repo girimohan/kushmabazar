@@ -23,10 +23,18 @@ export default function ContactPage() {
     e.preventDefault();
     if (!form.name || !form.email || !form.message) return;
     setStatus("submitting");
-    // Simulate a short delay (replace with real API call if needed)
-    await new Promise((r) => setTimeout(r, 800));
-    setStatus("success");
-    setForm(emptyForm);
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error("API error");
+      setStatus("success");
+      setForm(emptyForm);
+    } catch {
+      setStatus("error");
+    }
   }
 
   return (

@@ -6,7 +6,7 @@
 // Airtable. Shows success/error state after submission.
 // ──────────────────────────────────────────────────────────────
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useLang } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Textarea } from "@/components/ui/FormFields";
@@ -28,6 +28,8 @@ export default function SubmitPage() {
   const [form, setForm] = useState<SubmissionFormData>(emptyForm);
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [errors, setErrors] = useState<Partial<Record<keyof SubmissionFormData, string>>>({});
+  const [images, setImages] = useState<FileList | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const set = (field: keyof SubmissionFormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -57,14 +59,22 @@ export default function SubmitPage() {
 
     setStatus("submitting");
     try {
+      const fd = new FormData();
+      (Object.keys(form) as (keyof SubmissionFormData)[]).forEach((k) =>
+        fd.append(k, form[k])
+      );
+      if (images) {
+        Array.from(images).forEach((file) => fd.append("images", file));
+      }
       const res = await fetch("/api/submit-listing", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: fd,
       });
       if (!res.ok) throw new Error("API error");
       setStatus("success");
       setForm(emptyForm);
+      setImages(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch {
       setStatus("error");
     }
@@ -194,6 +204,32 @@ export default function SubmitPage() {
             onChange={set("contactEmail")}
             error={errors.contactEmail}
           />
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-card p-6 space-y-5">
+          <p className="text-xs font-bold uppercase tracking-widest text-ink-subtle border-b border-surface-border pb-3">
+            🖼️ Images (optional)
+          </p>
+          <div>
+            <label htmlFor="images" className="block text-sm font-medium text-ink mb-1">
+              Upload photos of your listing
+            </label>
+            <input
+              id="images"
+              ref={fileInputRef}
+              type="file"
+              name="images"
+              multiple
+              accept="image/*"
+              onChange={(e) => setImages(e.target.files)}
+              className="block w-full text-sm text-ink-muted file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-brand-blue/10 file:text-brand-blue hover:file:bg-brand-blue/20 cursor-pointer"
+            />
+            {images && images.length > 0 && (
+              <p className="mt-1 text-xs text-ink-muted">
+                {images.length} file{images.length !== 1 ? "s" : ""} selected
+              </p>
+            )}
+          </div>
         </div>
 
         <Button

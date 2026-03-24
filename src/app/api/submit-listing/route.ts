@@ -2,78 +2,82 @@
 // ──────────────────────────────────────────────────────────────
 // API route: POST /api/submit-listing
 //
-// Receives form data from the Submit Listing page and writes a
-// new record to the Airtable "Submissions" table with a default
-// Status of "Pending".
+// Accepts multipart/form-data from the Submit Listing page.
+// Uploads any attached images to Vercel Blob, then writes a new
+// record to the Airtable "Submissions" table.
 //
 // Required environment variables (set in .env.local / Vercel):
-//   AIRTABLE_API_KEY          — Personal Access Token from airtable.com/account
-//   AIRTABLE_BASE_ID          — e.g. "appXXXXXXXXXXXXXX" (from your base URL)
-//   AIRTABLE_SUBMISSIONS_TABLE — Name of your submissions table, e.g. "Submissions"
+//   AIRTABLE_API_KEY           — Personal Access Token from airtable.com/account
+//   AIRTABLE_BASE_ID           — e.g. "appXXXXXXXXXXXXXX"
+//   AIRTABLE_SUBMISSIONS_TABLE — e.g. "Submissions"
+//   BLOB_READ_WRITE_TOKEN      — From Vercel Dashboard → Storage → Blob
 // ──────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
+import { put } from "@vercel/blob";
 
-// ── Airtable config ─────────────────────────────────────────────
 const AIRTABLE_API_KEY = process.env.AIRTABLE_API_KEY;
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID;
 const AIRTABLE_TABLE = process.env.AIRTABLE_SUBMISSIONS_TABLE ?? "Submissions";
 
-// The Airtable REST endpoint for creating records
 function airtableUrl() {
   return `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE)}`;
 }
 
 export async function POST(req: NextRequest) {
-  // ── Check env vars ────────────────────────────────────────────
+  // ── Check Airtable env vars ───────────────────────────────────
   if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
-    console.warn(
-      "[submit-listing] Airtable env vars not set. " +
-        "Set AIRTABLE_API_KEY and AIRTABLE_BASE_ID in .env.local"
-    );
-    // Return 200 in development so the form still shows success
-    // while Airtable is not yet configured.
+    console.warn("[submit-listing] Airtable env vars not set.");
     if (process.env.NODE_ENV === "development") {
       return NextResponse.json(
-        { ok: true, dev: true, message: "Dev mode: Airtable not configured." },
+        { success: true, dev: true, message: "Dev mode: Airtable not configured." },
         { status: 200 }
       );
     }
-    return NextResponse.json(
-      { error: "Server not configured." },
-      { status: 503 }
-    );
+    return NextResponse.json({ error: "Server not configured." }, { status: 503 });
   }
 
-  // ── Parse body ────────────────────────────────────────────────
-  let body: Record<string, unknown>;
+  // ── Parse multipart/form-data ─────────────────────────────────
+  let formData: FormData;
   try {
-    body = await req.json();
+    formData = await req.formData();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid form data." }, { status: 400 });
   }
 
-  const {
-    title,
-    description,
-    category,
-    location,
-    price,
-    contactName,
-    contactPhone,
-    contactEmail,
-  } = body as Record<string, string>;
+  const title        = (formData.get("title")        as string | null)?.trim() ?? "";
+  const description  = (formData.get("description")  as string | null)?.trim() ?? "";
+  const category     = (formData.get("category")     as string | null)?.trim() ?? "";
+  const location     = (formData.get("location")     as string | null)?.trim() ?? "";
+  const price        = (formData.get("price")        as string | null)?.trim() ?? "";
+  const contactName  = (formData.get("contactName")  as string | null)?.trim() ?? "";
+  const contactPhone = (formData.get("contactPhone") as string | null)?.trim() ?? "";
+  const contactEmail = (formData.get("contactEmail") as string | null)?.trim() ?? "";
 
-  // ── Basic server-side validation ──────────────────────────────
+  // ── Validate required fields ──────────────────────────────────
   if (!title || !description || !category || !location || !contactName || !contactPhone) {
-    return NextResponse.json(
-      { error: "Missing required fields." },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
+  }
+
+  // ── Upload images to Vercel Blob ──────────────────────────────
+  const imageFiles = formData.getAll("images") as File[];
+  const imageUrls: string[] = [];
+
+  for (const file of imageFiles) {
+    if (!file || file.size === 0) continue;
+    try {
+      const blob = await put(
+        `listings/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`,
+        file,
+        { access: "public" }
+      );
+      imageUrls.push(blob.url);
+    } catch (err) {
+      console.warn("[submit-listing] Image upload failed, skipping:", err);
+    }
   }
 
   // ── Build Airtable fields ─────────────────────────────────────
-  // Column names must match EXACTLY what you have in Airtable.
   const fields: Record<string, unknown> = {
     Title: title,
     Description: description,
@@ -81,15 +85,19 @@ export async function POST(req: NextRequest) {
     Location: location,
     ContactName: contactName,
     ContactPhone: contactPhone,
-    Status: "Pending", // Default — moderator will set to "Approved"
+    Status: "Pending",
+    ImportedToListings: false,
   };
 
-  // Optional fields
   if (price && !isNaN(Number(price))) {
     fields.Price = Number(price);
   }
   if (contactEmail) {
     fields.ContactEmail = contactEmail;
+  }
+  if (imageUrls.length > 0) {
+    // Airtable attachment field expects array of { url } objects
+    fields.Images = imageUrls.map((url) => ({ url }));
   }
 
   // ── POST to Airtable ──────────────────────────────────────────
@@ -112,13 +120,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const record = await atRes.json();
-    return NextResponse.json({ ok: true, id: record.id }, { status: 201 });
+    return NextResponse.json(
+      { success: true, message: "Listing submitted successfully" },
+      { status: 201 }
+    );
   } catch (err) {
     console.error("[submit-listing] Network error:", err);
-    return NextResponse.json(
-      { error: "Failed to reach Airtable." },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: "Failed to reach Airtable." }, { status: 502 });
   }
 }
